@@ -13,7 +13,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jefrnc/sekd/internal/analysis"
 	"github.com/jefrnc/sekd/internal/config"
+	"regexp"
+
 	"github.com/jefrnc/sekd/internal/edgar"
+	"github.com/jefrnc/sekd/internal/watchlist"
+	"github.com/jefrnc/sekd/internal/history"
 )
 
 func renderBanner(version string) string {
@@ -57,19 +61,30 @@ func renderHelp() string {
 
 	cmds := []struct{ cmd, desc string }{
 		{"TICKER", "Run full due diligence report"},
+		{"/compare T1 T2", "Side-by-side comparison"},
+		{"/last", "Re-run last ticker"},
+		{"", ""},
 		{"/filings TICKER", "List SEC filings"},
-		{"/filings TICKER S-3", "Filter by form type"},
 		{"/read N", "Read filing at index N"},
 		{"/analyze N", "Analyze filing with AI"},
 		{"", ""},
-		{"/config", "Show current configuration"},
+		{"/watchlist", "Show watchlist"},
+		{"/watchlist add TICKER", "Add to watchlist"},
+		{"/watchlist remove TICKER", "Remove from watchlist"},
+		{"", ""},
+		{"/history", "Show command history"},
+		{"/recent", "Show recent tickers"},
+		{"/export [file]", "Export last output to file"},
+		{"/copy", "Copy last output to clipboard"},
+		{"/session", "Show session info"},
+		{"", ""},
+		{"/config", "Show configuration"},
 		{"/config set KEY VAL", "Set a config value"},
-		{"/config clear KEY", "Remove a config value"},
 		{"", ""},
 		{"/json", "Toggle JSON output"},
 		{"/md", "Toggle Markdown output"},
 		{"/clear", "Clear screen"},
-		{"/help", "Show this help"},
+		{"/help", "Show help"},
 		{"/quit", "Exit"},
 	}
 
@@ -305,6 +320,226 @@ func renderFilingsNav(ticker string, filings []edgar.Filing, cursor int) string 
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+func renderHistory(entries []history.Entry, limit int) string {
+	var b strings.Builder
+
+	b.WriteString("\n")
+	b.WriteString(StyleSection.Render("  ─── History ───"))
+	b.WriteString("\n\n")
+
+	if len(entries) == 0 {
+		b.WriteString(StyleInfo.Render("  No history yet"))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	for _, e := range entries {
+		ts := time.UnixMilli(e.Timestamp).Format("01/02 15:04")
+		typeStyle := StyleInfo
+		if e.Type == "ticker" {
+			typeStyle = lipgloss.NewStyle().Foreground(ColorCyan)
+		}
+		b.WriteString(fmt.Sprintf("  %s  %s  %s\n",
+			StyleInfo.Render(ts),
+			typeStyle.Render(fmt.Sprintf("%-8s", e.Type)),
+			e.Input,
+		))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(StyleInfo.Render("  Use ↑↓ arrows to navigate history in the prompt"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func renderRecentTickers(tickers []string) string {
+	var b strings.Builder
+
+	b.WriteString("\n")
+	b.WriteString(StyleSection.Render("  ─── Recent Tickers ───"))
+	b.WriteString("\n\n")
+
+	if len(tickers) == 0 {
+		b.WriteString(StyleInfo.Render("  No tickers yet"))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	for i, t := range tickers {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			StyleInfo.Render(fmt.Sprintf("[%d]", i)),
+			lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render(t),
+		))
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+func renderWatchlist(wl *watchlist.Watchlist) string {
+	var b strings.Builder
+
+	b.WriteString("\n")
+	b.WriteString(StyleSection.Render("  ─── Watchlist ───"))
+	b.WriteString("\n\n")
+
+	if len(wl.Entries) == 0 {
+		b.WriteString(StyleInfo.Render("  Empty. Use /watchlist add TICKER to add."))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	for _, e := range wl.Entries {
+		ts := time.UnixMilli(e.AddedAt).Format("01/02")
+		ticker := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Width(8).Render(e.Ticker)
+		note := ""
+		if e.Note != "" {
+			note = StyleInfo.Render(" — " + e.Note)
+		}
+		b.WriteString(fmt.Sprintf("  %s  %s%s\n", StyleInfo.Render(ts), ticker, note))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(StyleInfo.Render("  Type a ticker to run DD. /watchlist remove TICKER to delete."))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func renderCompare(r1, r2 *analysis.Report) string {
+	var b strings.Builder
+
+	b.WriteString("\n")
+	b.WriteString(StyleSection.Render(fmt.Sprintf("  ─── Compare: %s vs %s ───", r1.Ticker, r2.Ticker)))
+	b.WriteString("\n\n")
+
+	label := lipgloss.NewStyle().Foreground(ColorDim).Width(22)
+	col1 := lipgloss.NewStyle().Foreground(ColorCyan).Width(16)
+	col2 := lipgloss.NewStyle().Foreground(ColorOrange).Width(16)
+
+	// Header
+	b.WriteString(fmt.Sprintf("  %s %s %s\n",
+		label.Render(""),
+		col1.Bold(true).Render(r1.Ticker),
+		col2.Bold(true).Render(r2.Ticker),
+	))
+	b.WriteString(fmt.Sprintf("  %s %s %s\n", label.Render(""), strings.Repeat("─", 14), strings.Repeat("─", 14)))
+
+	rows := []struct {
+		k, v1, v2 string
+	}{
+		{"Sector", r1.Sector, r2.Sector},
+		{"Market Cap", r1.MarketCap, r2.MarketCap},
+		{"Price", r1.Price, r2.Price},
+		{"Float", r1.Float, r2.Float},
+		{"Short Float", r1.ShortFloat, r2.ShortFloat},
+		{"Insider Own", r1.InsiderOwn, r2.InsiderOwn},
+		{"Inst Own", r1.InstOwn, r2.InstOwn},
+		{"Dilution (12M)", fmt.Sprintf("%.1f%%", r1.Dilution.DilutionRate12M), fmt.Sprintf("%.1f%%", r2.Dilution.DilutionRate12M)},
+		{"Auth/Out Ratio", fmt.Sprintf("%.1fx", r1.Dilution.AuthorizedRatio), fmt.Sprintf("%.1fx", r2.Dilution.AuthorizedRatio)},
+		{"ATM Filings", fmt.Sprintf("%d", len(r1.Dilution.ATMFilings)), fmt.Sprintf("%d", len(r2.Dilution.ATMFilings))},
+		{"Shelf Regs", fmt.Sprintf("%d", len(r1.Dilution.ShelfRegistrations)), fmt.Sprintf("%d", len(r2.Dilution.ShelfRegistrations))},
+		{"Risk Flags", fmt.Sprintf("%d", len(r1.RiskFlags)), fmt.Sprintf("%d", len(r2.RiskFlags))},
+		{"DD Score", fmt.Sprintf("%d (%s)", r1.Score.Score, r1.Score.Grade), fmt.Sprintf("%d (%s)", r2.Score.Score, r2.Score.Grade)},
+	}
+
+	for _, r := range rows {
+		v1 := col1.Render(r.v1)
+		v2 := col2.Render(r.v2)
+		b.WriteString(fmt.Sprintf("  %s %s %s\n", label.Render(r.k), v1, v2))
+	}
+
+	// Risk flags detail
+	b.WriteString("\n")
+	if len(r1.RiskFlags) > 0 || len(r2.RiskFlags) > 0 {
+		b.WriteString(fmt.Sprintf("  %s\n", StyleSection.Render("Risk Flags:")))
+		allFlags := make(map[string]bool)
+		r1Flags := make(map[string]string)
+		r2Flags := make(map[string]string)
+		for _, f := range r1.RiskFlags {
+			allFlags[f.Label] = true
+			r1Flags[f.Label] = f.Severity
+		}
+		for _, f := range r2.RiskFlags {
+			allFlags[f.Label] = true
+			r2Flags[f.Label] = f.Severity
+		}
+		for flag := range allFlags {
+			s1 := StyleInfo.Render("  —")
+			s2 := StyleInfo.Render("  —")
+			if sev, ok := r1Flags[flag]; ok {
+				if sev == "HIGH" {
+					s1 = StyleFilingRed.Render("  [!]")
+				} else {
+					s1 = StyleFilingYellow.Render("  [~]")
+				}
+			}
+			if sev, ok := r2Flags[flag]; ok {
+				if sev == "HIGH" {
+					s2 = StyleFilingRed.Render("  [!]")
+				} else {
+					s2 = StyleFilingYellow.Render("  [~]")
+				}
+			}
+			b.WriteString(fmt.Sprintf("  %s %s %s\n", label.Render(flag), col1.Render(s1), col2.Render(s2)))
+		}
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+func renderSessionInfo(m *Model) string {
+	var b strings.Builder
+
+	b.WriteString("\n")
+	b.WriteString(StyleSection.Render("  ─── Session ───"))
+	b.WriteString("\n\n")
+
+	label := lipgloss.NewStyle().Foreground(ColorDim).Width(18)
+
+	ticker := "—"
+	if m.lastTicker != "" {
+		ticker = m.lastTicker
+	}
+	b.WriteString(fmt.Sprintf("  %s %s\n", label.Render("Last Ticker"), ticker))
+
+	score := "—"
+	if m.lastScore != nil {
+		score = fmt.Sprintf("%d (%s)", m.lastScore.Score, m.lastScore.Grade)
+	}
+	b.WriteString(fmt.Sprintf("  %s %s\n", label.Render("Last Score"), score))
+
+	b.WriteString(fmt.Sprintf("  %s %s\n", label.Render("Output Mode"), m.outputMode))
+
+	filings := "—"
+	if m.lastFilings != nil {
+		filings = fmt.Sprintf("%d loaded", len(m.lastFilings))
+	}
+	b.WriteString(fmt.Sprintf("  %s %s\n", label.Render("Filings"), filings))
+
+	wl, _ := watchlist.Load()
+	b.WriteString(fmt.Sprintf("  %s %d tickers\n", label.Render("Watchlist"), len(wl.Entries)))
+
+	histEntries := m.history.GetAll()
+	b.WriteString(fmt.Sprintf("  %s %d entries\n", label.Render("History"), len(histEntries)))
+
+	b.WriteString("\n")
+	b.WriteString(StyleInfo.Render("  /session clear to reset"))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripAnsi(s string) string {
+	return ansiRegex.ReplaceAllString(s, "")
 }
 
 // captureOutput captures stdout from a function call

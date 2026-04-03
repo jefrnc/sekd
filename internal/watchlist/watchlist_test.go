@@ -1,0 +1,128 @@
+package watchlist
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func testWatchlist(t *testing.T) *Watchlist {
+	t.Helper()
+	dir := t.TempDir()
+	return &Watchlist{path: filepath.Join(dir, "watchlist.json")}
+}
+
+func TestAddAndTickers(t *testing.T) {
+	w := testWatchlist(t)
+	w.Add("SOUN", "")
+	w.Add("MARA", "bitcoin miner")
+	w.Add("AAPL", "")
+
+	tickers := w.Tickers()
+	if len(tickers) != 3 {
+		t.Fatalf("expected 3, got %d", len(tickers))
+	}
+}
+
+func TestAddDuplicate(t *testing.T) {
+	w := testWatchlist(t)
+	w.Add("SOUN", "")
+	ok := w.Add("soun", "")
+	if ok {
+		t.Error("should return false for duplicate")
+	}
+	if len(w.Entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(w.Entries))
+	}
+}
+
+func TestAddEmpty(t *testing.T) {
+	w := testWatchlist(t)
+	ok := w.Add("", "")
+	if ok {
+		t.Error("should return false for empty ticker")
+	}
+}
+
+func TestRemove(t *testing.T) {
+	w := testWatchlist(t)
+	w.Add("SOUN", "")
+	w.Add("MARA", "")
+
+	ok := w.Remove("soun")
+	if !ok {
+		t.Error("should return true for existing ticker")
+	}
+	if len(w.Entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(w.Entries))
+	}
+	if w.Entries[0].Ticker != "MARA" {
+		t.Errorf("expected MARA, got %s", w.Entries[0].Ticker)
+	}
+}
+
+func TestRemoveNonExistent(t *testing.T) {
+	w := testWatchlist(t)
+	ok := w.Remove("AAPL")
+	if ok {
+		t.Error("should return false for non-existent")
+	}
+}
+
+func TestHas(t *testing.T) {
+	w := testWatchlist(t)
+	w.Add("SOUN", "")
+
+	if !w.Has("soun") {
+		t.Error("should find SOUN (case insensitive)")
+	}
+	if w.Has("MARA") {
+		t.Error("should not find MARA")
+	}
+}
+
+func TestSaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "watchlist.json")
+
+	w := &Watchlist{path: path}
+	w.Add("SOUN", "ai company")
+	w.Add("MARA", "")
+	w.Save()
+
+	// Verify file
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Fatal("file not created")
+	}
+
+	// Load
+	w2 := &Watchlist{path: path}
+	data, _ := os.ReadFile(path)
+	if len(data) == 0 {
+		t.Fatal("empty file")
+	}
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", dir)
+	defer os.Setenv("HOME", origHome)
+
+	// Re-create path structure for Load
+	os.MkdirAll(filepath.Join(dir, ".sekd"), 0700)
+	os.WriteFile(filepath.Join(dir, ".sekd", "watchlist.json"), data, 0600)
+	w2, _ = Load()
+
+	if len(w2.Entries) != 2 {
+		t.Fatalf("expected 2 entries after load, got %d", len(w2.Entries))
+	}
+	if w2.Entries[0].Note != "ai company" {
+		t.Errorf("note = %q, want 'ai company'", w2.Entries[0].Note)
+	}
+}
+
+func TestUppercase(t *testing.T) {
+	w := testWatchlist(t)
+	w.Add("soun", "")
+	if w.Entries[0].Ticker != "SOUN" {
+		t.Errorf("expected uppercase, got %s", w.Entries[0].Ticker)
+	}
+}
