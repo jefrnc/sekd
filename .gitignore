@@ -1,0 +1,30 @@
+# Binary
+sekd
+sekd-*
+dist/
+
+# Go
+*.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Environment and secrets
+.env
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# GoReleaser
+dist/
