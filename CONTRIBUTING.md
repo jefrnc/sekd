@@ -88,6 +88,11 @@ internal/
 - Run `go vet ./...` and fix all warnings
 - Do not commit binaries, cached data, or API keys — the `.gitignore` covers the common cases
 
+## Further reading
+
+- [`docs/architecture.md`](docs/architecture.md) — data flow diagrams for the normal report and deep extraction paths, plus where on-disk state lives
+- [`docs/deep-extraction.md`](docs/deep-extraction.md) — internals of `--deep`, including the prompt versioning rules you should read **before** touching `internal/analysis/deep.go`
+
 ## Working on LLM-dependent features
 
 Two features rely on an AI provider (OpenAI or Anthropic): `/analyze` and `sekd report --deep`. When developing against them:

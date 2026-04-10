@@ -268,7 +268,12 @@ make fmt
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards. Security issues should follow [SECURITY.md](SECURITY.md).
+
+### Further reading
+
+- [`docs/architecture.md`](docs/architecture.md) — how data flows through the pipeline, where state lives, and how to add a new data source
+- [`docs/deep-extraction.md`](docs/deep-extraction.md) — internals of `--deep`: prompt design, cache keys, when to bump the prompt version, cost model
 
 ## Disclaimer
 
