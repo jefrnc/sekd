@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-04-10
 
 ### Added
 - `sekd report TICKER --deep` flag that extracts structured shelf/ATM/warrant/convertible data from recent S-3, 424B, and 10-Q filings via an LLM (OpenAI or Anthropic). Results are cached per accession number + prompt version so repeat runs cost nothing.
@@ -52,4 +52,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI commands: `report`, `filings`, `version`
 - Homebrew tap distribution
 
+[0.2.0]: https://github.com/jefrnc/sekd/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jefrnc/sekd/releases/tag/v0.1.0
