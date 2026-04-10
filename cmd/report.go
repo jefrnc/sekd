@@ -30,6 +30,10 @@ var reportCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("initializing cache: %w", err)
 		}
+		if noCache {
+			c.SetBypass(true)
+			fmt.Fprintln(os.Stderr, "Cache bypass enabled: every request will hit the source.")
+		}
 
 		builder := report.NewBuilder(c)
 		ctx := context.Background()

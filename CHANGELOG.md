@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `renderHelp` rewritten to read from the slash command registry.
 - Terminal and markdown renderers now show `—` instead of `$0.0000` for missing strike/conversion prices in warrant and convertible tables.
 
+### Fixed
+- `sekd report --no-cache` now actually bypasses the cache. The flag was declared but never wired through; it is now backed by a `bypass` field on `cache.Cache` that makes `Get` always miss while still allowing `Set` to warm the cache for subsequent non-bypass runs.
+
 ## [0.1.0] - 2026-04-03
 
 ### Added
