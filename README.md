@@ -7,6 +7,10 @@
 [![Go](https://img.shields.io/github/go-mod/go-version/jefrnc/sekd)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+<p align="center">
+  <img src="docs/assets/terminal.gif" alt="sekd interactive mode demo" width="800"/>
+</p>
+
 ---
 
 ## What it does
