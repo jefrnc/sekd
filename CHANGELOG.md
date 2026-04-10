@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-10
+
+### Changed
+- Homebrew packaging migrated from `brews` (deprecated in GoReleaser v2.10) to `homebrew_casks`. The tap repository `jefrnc/homebrew-sekd` now ships `Casks/sekd.rb` instead of `Formula/sekd.rb`. Existing installations are migrated transparently via `tap_migrations.json` in the tap repo — users running `brew upgrade` do not need to re-tap or re-install.
+- The Cask includes a post-install hook that strips the `com.apple.quarantine` xattr so the unsigned macOS binary can run without manual Gatekeeper intervention.
+
 ## [0.2.0] - 2026-04-10
 
 ### Added
@@ -52,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI commands: `report`, `filings`, `version`
 - Homebrew tap distribution
 
+[0.2.1]: https://github.com/jefrnc/sekd/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jefrnc/sekd/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jefrnc/sekd/releases/tag/v0.1.0
