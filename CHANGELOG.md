@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `sekd report --no-cache` now actually bypasses the cache. The flag was declared but never wired through; it is now backed by a `bypass` field on `cache.Cache` that makes `Get` always miss while still allowing `Set` to warm the cache for subsequent non-bypass runs.
+- **Finviz quotes are now actually cached.** The `Scraper` accepted a `*cache.Cache` in its constructor but ignored it on the hot path, so every report call re-fetched Finviz even within the same second. Quotes are now cached for 15 minutes and honor the `--no-cache` bypass flag.
+- **Corrupt `watchlist.json` no longer destroys user data.** Previously, if the file failed to parse, `Load` would silently return an empty list and the next `Save` would overwrite the original — losing every watched ticker. Corrupt files are now renamed to `watchlist.json.broken-<timestamp>`, the load returns an error the caller can surface, and `Save` refuses to write until the path is valid.
+- **Corrupt `config.json` no longer silently discards the user's API keys.** `config.Load` now returns a descriptive error instead of swallowing the JSON parse failure, and `cmd/root.go` prints a loud warning on startup so the user knows why their keys aren't being read.
+
+### Tests
+- New `finviz` package tests covering cache reuse, bypass-mode forced re-fetch, and upstream error handling.
+- New `watchlist` regression test locking in the corrupt-file backup behavior.
+- New `config` regression test locking in the corrupt-file error path.
+- New `cache` tests for the bypass mode (read misses while writes still warm the cache).
 
 ## [0.1.0] - 2026-04-03
 

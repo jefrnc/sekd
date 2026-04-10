@@ -1,8 +1,10 @@
 package finviz
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +12,12 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/jefrnc/sekd/internal/cache"
 )
+
+// quoteCacheTTL controls how long a Finviz quote response is considered
+// fresh. Quote-level data (price, volume) drifts within the day, so we
+// keep this short. Sector / industry / float move slowly, but we still
+// re-fetch them on the same TTL to keep the code simple.
+const quoteCacheTTL = 15 * time.Minute
 
 type Scraper struct {
 	http  *http.Client
@@ -23,8 +31,16 @@ func NewScraper(c *cache.Cache) *Scraper {
 	}
 }
 
-func (s *Scraper) GetQuote(ctx context.Context, ticker string) (*Quote, error) {
-	url := fmt.Sprintf("https://finviz.com/quote.ashx?t=%s&ty=c&p=d&b=1", strings.ToUpper(ticker))
+// get fetches a URL with cache-aware semantics: a cached response within
+// TTL is returned immediately, otherwise a fresh HTTP GET populates the
+// cache and returns the body. Respects the cache's bypass mode set by
+// --no-cache.
+func (s *Scraper) get(ctx context.Context, url string) ([]byte, error) {
+	if s.cache != nil {
+		if data, ok := s.cache.Get(url, quoteCacheTTL); ok {
+			return data, nil
+		}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -42,7 +58,26 @@ func (s *Scraper) GetQuote(ctx context.Context, ticker string) (*Quote, error) {
 		return nil, fmt.Errorf("finviz returned %d", resp.StatusCode)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading finviz body: %w", err)
+	}
+
+	if s.cache != nil {
+		_ = s.cache.Set(url, data)
+	}
+	return data, nil
+}
+
+func (s *Scraper) GetQuote(ctx context.Context, ticker string) (*Quote, error) {
+	url := fmt.Sprintf("https://finviz.com/quote.ashx?t=%s&ty=c&p=d&b=1", strings.ToUpper(ticker))
+
+	body, err := s.get(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("parsing finviz HTML: %w", err)
 	}

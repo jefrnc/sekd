@@ -842,7 +842,15 @@ func (m *Model) handleExport(parts []string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleWatchlist(parts []string) (tea.Model, tea.Cmd) {
-	wl, _ := watchlist.Load()
+	wl, err := watchlist.Load()
+	if err != nil {
+		// Surface corrupt-file errors so the user understands why their
+		// list looks empty. Loading always returns a safe empty Watchlist
+		// on error, so subsequent operations still work.
+		m.output = StyleError.Render("  ✗ "+err.Error()) + "\n"
+		m.state = stateInput
+		return m, nil
+	}
 
 	if len(parts) < 2 {
 		// Show watchlist

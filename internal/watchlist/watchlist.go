@@ -2,6 +2,7 @@ package watchlist
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,19 +41,36 @@ func Load() (*Watchlist, error) {
 		return &Watchlist{}, nil
 	}
 	dir := filepath.Join(home, ".sekd")
-	os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return &Watchlist{path: filepath.Join(dir, "watchlist.json")}, nil
+	}
 	path := filepath.Join(dir, "watchlist.json")
 
 	w := &Watchlist{path: path}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// No file yet — return an empty watchlist ready for the first Add.
 		return w, nil
 	}
-	json.Unmarshal(data, w)
+	if err := json.Unmarshal(data, w); err != nil {
+		// The file exists but is not valid JSON. Refusing to overwrite it
+		// is the only safe choice — otherwise the next Save would destroy
+		// whatever data the user had. Back it up, return an empty in-memory
+		// watchlist with no path (so Save will no-op), and surface the error.
+		backup := fmt.Sprintf("%s.broken-%d", path, time.Now().Unix())
+		_ = os.Rename(path, backup)
+		return &Watchlist{}, fmt.Errorf("watchlist file %s was corrupt and has been moved to %s; starting with an empty list: %w", path, backup, err)
+	}
+	w.path = path
 	return w, nil
 }
 
 func (w *Watchlist) Save() error {
+	// If the watchlist was loaded from a corrupt file we intentionally
+	// leave path empty to prevent Save from overwriting user data.
+	if w.path == "" {
+		return fmt.Errorf("watchlist has no path; refusing to save (was the file corrupt on load?)")
+	}
 	data, err := json.MarshalIndent(w, "", "  ")
 	if err != nil {
 		return err

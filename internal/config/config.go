@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,10 +34,15 @@ func Load() (*Config, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// No config file yet — return defaults. This is the fresh-install path.
 		return &Config{}, nil
 	}
 	var cfg Config
-	json.Unmarshal(data, &cfg)
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		// File exists but is unparseable. Surface the error instead of
+		// silently discarding the user's (possibly recoverable) config.
+		return &Config{}, fmt.Errorf("config file %s is corrupt: %w", path, err)
+	}
 	return &cfg, nil
 }
 

@@ -44,7 +44,7 @@ This document explains **how data flows** through sekd when you run a command. F
 **Key properties:**
 
 - **Fan-out is concurrent, merge is sequential.** All four data-source calls run in parallel via `golang.org/x/sync/errgroup`. The builder blocks on the whole group and then runs analysis synchronously.
-- **Every HTTP call goes through `internal/cache`.** The cache is keyed by URL hash, stored in `~/.sekd/cache/`, and has per-call TTLs (submissions: 1h, XBRL: 24h, Finviz: 15m). Rate-limit-friendly by default.
+- **Every HTTP call goes through `internal/cache`.** The cache is keyed by URL hash and stored in `~/.sekd/cache/`. TTLs are set by each caller: EDGAR ticker list and filing documents use 7 days, EDGAR submissions and XBRL company facts use 24 hours, Finviz quotes use 15 minutes, deep extraction uses effectively forever (10 years). Rate-limit-friendly by default and bypassable with `--no-cache`.
 - **The builder is the only piece that knows about all the sources.** Everything downstream (analysis, renderers) operates only on the neutral `analysis.Report` struct. This is why adding a new risk flag or a new renderer is a local change.
 
 ## Deep extraction flow — `--deep`
