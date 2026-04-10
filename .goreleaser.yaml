@@ -36,16 +36,26 @@ changelog:
       - "^ci:"
       - "^chore:"
 
-brews:
-  - repository:
+homebrew_casks:
+  - name: sekd
+    repository:
       owner: jefrnc
       name: homebrew-sekd
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
     homepage: "https://github.com/jefrnc/sekd"
     description: "Day-trading due diligence in your terminal — SEC filings, dilution risk, and AI extraction"
-    license: "MIT"
-    install: |
-      bin.install "sekd"
-    test: |
-      system bin/"sekd", "version"
+    # The downloaded archive is hosted on github.com/jefrnc, so tell brew
+    # to treat that as the verified source domain (keeps `brew audit` happy
+    # even if the homepage host ever differs from the download host).
+    url:
+      verified: github.com/jefrnc/sekd
+    # sekd is an unsigned, un-notarized macOS binary. Without this hook,
+    # Gatekeeper quarantines it on install and running `sekd` tries to
+    # launch "an app downloaded from the internet". Stripping the
+    # com.apple.quarantine xattr post-install makes it runnable.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/sekd"]
+          end
