@@ -12,6 +12,21 @@ type Entry struct {
 	Ticker  string `json:"ticker"`
 	Note    string `json:"note,omitempty"`
 	AddedAt int64  `json:"added_at"`
+
+	// Snapshot fields populated by /watchlist scan. Zero values on entries
+	// that have never been scanned — compare paths must handle that.
+	LastScore     int      `json:"last_score,omitempty"`
+	LastGrade     string   `json:"last_grade,omitempty"`
+	LastFlags     []string `json:"last_flags,omitempty"`
+	LastAccession string   `json:"last_accession,omitempty"`
+	LastFilingDate string  `json:"last_filing_date,omitempty"`
+	LastScannedAt int64    `json:"last_scanned_at,omitempty"`
+}
+
+// HasSnapshot reports whether this entry has ever been scanned, which
+// determines whether a diff can be computed vs the current state.
+func (e *Entry) HasSnapshot() bool {
+	return e.LastScannedAt > 0
 }
 
 type Watchlist struct {
@@ -78,6 +93,25 @@ func (w *Watchlist) Has(ticker string) bool {
 	ticker = strings.ToUpper(strings.TrimSpace(ticker))
 	for _, e := range w.Entries {
 		if e.Ticker == ticker {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateSnapshot writes the latest scan result into the matching entry so
+// the next scan can compute a diff. Returns false if the ticker isn't in
+// the watchlist.
+func (w *Watchlist) UpdateSnapshot(ticker string, score int, grade string, flags []string, lastAccession, lastFilingDate string) bool {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	for i := range w.Entries {
+		if w.Entries[i].Ticker == ticker {
+			w.Entries[i].LastScore = score
+			w.Entries[i].LastGrade = grade
+			w.Entries[i].LastFlags = flags
+			w.Entries[i].LastAccession = lastAccession
+			w.Entries[i].LastFilingDate = lastFilingDate
+			w.Entries[i].LastScannedAt = time.Now().UnixMilli()
 			return true
 		}
 	}

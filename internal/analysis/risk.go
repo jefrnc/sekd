@@ -76,8 +76,86 @@ func EvaluateRiskFlags(da DilutionAnalysis, insiderCount int, quote QuoteData) [
 
 type QuoteData struct {
 	Float         string
+	FloatShares   float64
 	IsLowFloat    bool
 	ShortFloatPct float64
+	PriceUSD      float64
+}
+
+// EvaluateDeepRiskFlags returns additional risk flags derived from deep
+// dilution data (warrants ITM, large shelf remaining). Only called when
+// --deep data is present; otherwise these flags are skipped entirely.
+func EvaluateDeepRiskFlags(d *DeepDilution, quote QuoteData, marketCap float64) []RiskFlagDetail {
+	if d == nil {
+		return nil
+	}
+	var flags []RiskFlagDetail
+
+	if d.ITMWarrantShares > 0 {
+		severity := "MEDIUM"
+		points := 10
+		desc := fmt.Sprintf("%s warrant shares at or below current price", formatShareCount(d.ITMWarrantShares))
+		if quote.FloatShares > 0 {
+			pct := d.ITMWarrantShares / quote.FloatShares * 100
+			desc = fmt.Sprintf("%s warrant shares ITM (%.1f%% of float)", formatShareCount(d.ITMWarrantShares), pct)
+			if pct >= 5 {
+				severity = "HIGH"
+				points = 20
+			}
+		}
+		flags = append(flags, RiskFlagDetail{
+			Flag:        FlagWarrantsITM,
+			Label:       "Warrants In The Money",
+			Description: desc,
+			Severity:    severity,
+			Points:      points,
+		})
+	}
+
+	if d.ShelfRemainingUSD > 0 && marketCap > 0 {
+		ratio := d.ShelfRemainingUSD / marketCap
+		if ratio >= 0.25 {
+			severity := "MEDIUM"
+			points := 10
+			if ratio >= 0.5 {
+				severity = "HIGH"
+				points = 15
+			}
+			flags = append(flags, RiskFlagDetail{
+				Flag:        FlagShelfCapacity,
+				Label:       "Large Shelf Capacity Remaining",
+				Description: fmt.Sprintf("$%s shelf remaining (%.0f%% of market cap)", formatUSDCompact(d.ShelfRemainingUSD), ratio*100),
+				Severity:    severity,
+				Points:      points,
+			})
+		}
+	}
+
+	return flags
+}
+
+func formatShareCount(n float64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", n/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fK", n/1_000)
+	default:
+		return fmt.Sprintf("%.0f", n)
+	}
+}
+
+func formatUSDCompact(n float64) string {
+	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.2fB", n/1_000_000_000)
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", n/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fK", n/1_000)
+	default:
+		return fmt.Sprintf("%.0f", n)
+	}
 }
 
 func ParseFloatString(s string) (float64, bool) {

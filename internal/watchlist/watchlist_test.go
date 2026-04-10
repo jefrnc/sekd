@@ -24,6 +24,45 @@ func TestAddAndTickers(t *testing.T) {
 	}
 }
 
+func TestUpdateSnapshot(t *testing.T) {
+	w := testWatchlist(t)
+	w.Add("SOUN", "")
+
+	before := w.Entries[0]
+	if before.HasSnapshot() {
+		t.Error("fresh entry should not report HasSnapshot")
+	}
+
+	ok := w.UpdateSnapshot("SOUN", 55, "D", []string{"High Dilution", "High Short Interest"}, "0001840856-25-000001", "2025-01-28")
+	if !ok {
+		t.Fatal("UpdateSnapshot returned false for existing ticker")
+	}
+
+	after := w.Entries[0]
+	if !after.HasSnapshot() {
+		t.Error("entry should report HasSnapshot after update")
+	}
+	if after.LastScore != 55 || after.LastGrade != "D" {
+		t.Errorf("score/grade not saved: %+v", after)
+	}
+	if after.LastAccession != "0001840856-25-000001" {
+		t.Errorf("accession not saved: %q", after.LastAccession)
+	}
+	if len(after.LastFlags) != 2 {
+		t.Errorf("flags not saved: %v", after.LastFlags)
+	}
+	if after.LastScannedAt == 0 {
+		t.Error("LastScannedAt should be set")
+	}
+}
+
+func TestUpdateSnapshot_UnknownTicker(t *testing.T) {
+	w := testWatchlist(t)
+	if w.UpdateSnapshot("NOPE", 0, "", nil, "", "") {
+		t.Error("expected false for unknown ticker")
+	}
+}
+
 func TestAddDuplicate(t *testing.T) {
 	w := testWatchlist(t)
 	w.Add("SOUN", "")

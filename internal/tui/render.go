@@ -53,53 +53,81 @@ func renderBanner(version string) string {
 	return b.String()
 }
 
+// renderSlashPalette renders the filtered command list shown below the input
+// when the user is typing a slash command. selected is the palette index of
+// the currently highlighted row (-1 = nothing highlighted yet, Tab will pick
+// the first match).
+func renderSlashPalette(input string, selected int) string {
+	matches := MatchSlashCommands(input)
+	if len(matches) == 0 {
+		return StyleInfo.Render("  no matching commands (type /help to see all)") + "\n"
+	}
+
+	// Cap to keep the palette small.
+	const maxRows = 8
+	shown := matches
+	truncated := false
+	if len(shown) > maxRows {
+		shown = shown[:maxRows]
+		truncated = true
+	}
+
+	var b strings.Builder
+	nameWidth := 0
+	for _, c := range shown {
+		if n := len(c.Canonical()); n > nameWidth {
+			nameWidth = n
+		}
+	}
+	nameStyle := lipgloss.NewStyle().Foreground(ColorCyan).Width(nameWidth + 2)
+	selectedStyle := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Width(nameWidth + 2)
+
+	for i, c := range shown {
+		marker := "   "
+		name := nameStyle.Render(c.Canonical())
+		if i == selected {
+			marker = " ▸ "
+			name = selectedStyle.Render(c.Canonical())
+		}
+		desc := StyleInfo.Render(c.Desc)
+		if c.Usage != "" {
+			desc = StyleInfo.Render(c.Usage + "  — " + c.Desc)
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s\n", marker, name, desc))
+	}
+	if truncated {
+		b.WriteString(StyleInfo.Render(fmt.Sprintf("   … +%d more (keep typing to narrow)", len(matches)-maxRows)))
+		b.WriteString("\n")
+	}
+	b.WriteString(StyleInfo.Render("   tab: cycle · enter: run · esc: cancel"))
+	b.WriteString("\n")
+	return b.String()
+}
+
 func renderHelp() string {
 	var b strings.Builder
 
 	title := StyleSection.Render("  ─── Commands ───")
 	b.WriteString("\n" + title + "\n\n")
 
-	cmds := []struct{ cmd, desc string }{
-		{"TICKER", "Run full due diligence report"},
-		{"/compare T1 T2", "Side-by-side comparison"},
-		{"/last", "Re-run last ticker"},
-		{"", ""},
-		{"/filings TICKER", "List SEC filings"},
-		{"/read N", "Read filing at index N"},
-		{"/analyze N", "Analyze filing with AI"},
-		{"", ""},
-		{"/watchlist", "Show watchlist"},
-		{"/watchlist add TICKER", "Add to watchlist"},
-		{"/watchlist remove TICKER", "Remove from watchlist"},
-		{"", ""},
-		{"/history", "Show command history"},
-		{"/recent", "Show recent tickers"},
-		{"/export [file]", "Export last output to file"},
-		{"/copy", "Copy last output to clipboard"},
-		{"/session", "Show session info"},
-		{"", ""},
-		{"/config", "Show configuration"},
-		{"/config set KEY VAL", "Set a config value"},
-		{"", ""},
-		{"/json", "Toggle JSON output"},
-		{"/md", "Toggle Markdown output"},
-		{"/clear", "Clear screen"},
-		{"/help", "Show help"},
-		{"/quit", "Exit"},
-	}
+	tickerRow := lipgloss.NewStyle().Foreground(ColorCyan).Width(28).Render("  TICKER")
+	b.WriteString(tickerRow + StyleInfo.Render("Run full due diligence report") + "\n")
+	deepRow := lipgloss.NewStyle().Foreground(ColorCyan).Width(28).Render("  TICKER --deep")
+	b.WriteString(deepRow + StyleInfo.Render("(CLI) Extract shelf/warrants/convertibles via LLM") + "\n\n")
 
-	for _, c := range cmds {
-		if c.cmd == "" {
-			b.WriteString("\n")
-			continue
+	for _, c := range SlashCommands {
+		label := "  " + c.Canonical()
+		if c.Usage != "" {
+			label = "  " + c.Usage
 		}
-		cmd := lipgloss.NewStyle().Foreground(ColorCyan).Width(22).Render("  " + c.cmd)
-		desc := StyleInfo.Render(c.desc)
-		b.WriteString(cmd + desc + "\n")
+		name := lipgloss.NewStyle().Foreground(ColorCyan).Width(28).Render(label)
+		b.WriteString(name + StyleInfo.Render(c.Desc) + "\n")
 	}
 
 	b.WriteString("\n")
 	b.WriteString(StyleInfo.Render("  Config keys: openai-key, openai-model, anthropic-key, anthropic-model"))
+	b.WriteString("\n")
+	b.WriteString(StyleInfo.Render("  Tip: start typing / to see the command palette with live matches."))
 	b.WriteString("\n\n")
 
 	return b.String()
@@ -407,6 +435,100 @@ func renderWatchlist(wl *watchlist.Watchlist) string {
 
 	b.WriteString("\n")
 	b.WriteString(StyleInfo.Render("  Type a ticker to run DD. /watchlist remove TICKER to delete."))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderScanResults renders the output of /watchlist scan: a per-ticker
+// summary of what changed since the last snapshot, with unchanged tickers
+// collapsed into a single line so the interesting ones stand out.
+func renderScanResults(results []scanResult) string {
+	var b strings.Builder
+
+	b.WriteString("\n")
+	b.WriteString(StyleSection.Render(fmt.Sprintf("  ─── Watchlist Scan (%d tickers) ───", len(results))))
+	b.WriteString("\n\n")
+
+	tickerStyle := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Width(8)
+	unchanged := 0
+	hadDelta := false
+
+	for _, r := range results {
+		if r.err != nil {
+			b.WriteString(fmt.Sprintf("  %s %s %s\n",
+				StyleError.Render("✗"),
+				tickerStyle.Render(r.ticker),
+				StyleError.Render(r.err.Error()),
+			))
+			hadDelta = true
+			continue
+		}
+
+		// First-time scan — no previous snapshot to diff against.
+		if r.prev == nil || !r.prev.HasSnapshot() {
+			b.WriteString(fmt.Sprintf("  %s %s %s (%s %d) — first scan, snapshot saved\n",
+				StyleInfo.Render("•"),
+				tickerStyle.Render(r.ticker),
+				StyleInfo.Render("baseline:"),
+				StyleInfo.Render(r.cur.Score.Grade),
+				r.cur.Score.Score,
+			))
+			hadDelta = true
+			continue
+		}
+
+		// No deltas at all — collapse to a counter.
+		if !r.hasNew && r.scoreDelta == 0 && len(r.newFlags) == 0 && len(r.removedFlags) == 0 {
+			unchanged++
+			continue
+		}
+
+		hadDelta = true
+		// Severity marker: new filing or negative score delta = warning.
+		marker := StyleInfo.Render("•")
+		if r.hasNew || r.scoreDelta < 0 || len(r.newFlags) > 0 {
+			marker = StyleFilingYellow.Render("⚠")
+		}
+		if r.scoreDelta <= -15 {
+			marker = StyleFilingRed.Render("🔴")
+		}
+
+		scoreBit := fmt.Sprintf("%s %d", r.cur.Score.Grade, r.cur.Score.Score)
+		if r.scoreDelta != 0 {
+			sign := "+"
+			if r.scoreDelta < 0 {
+				sign = ""
+			}
+			scoreBit = fmt.Sprintf("%s %d (%s%d vs last)", r.cur.Score.Grade, r.cur.Score.Score, sign, r.scoreDelta)
+		}
+
+		b.WriteString(fmt.Sprintf("  %s %s %s\n", marker, tickerStyle.Render(r.ticker), StyleInfo.Render(scoreBit)))
+
+		if r.hasNew {
+			form := r.cur.LatestFilingForm
+			date := r.cur.LatestFilingDate
+			b.WriteString(fmt.Sprintf("      %s new filing: %s on %s\n", StyleFilingYellow.Render("→"), form, date))
+		}
+		if len(r.newFlags) > 0 {
+			b.WriteString(fmt.Sprintf("      %s new flags: %s\n", StyleFilingRed.Render("+"), strings.Join(r.newFlags, ", ")))
+		}
+		if len(r.removedFlags) > 0 {
+			b.WriteString(fmt.Sprintf("      %s cleared flags: %s\n", StyleFilingGreen.Render("−"), strings.Join(r.removedFlags, ", ")))
+		}
+	}
+
+	if unchanged > 0 {
+		b.WriteString("\n")
+		b.WriteString(StyleSuccess.Render(fmt.Sprintf("  ✓ %d unchanged", unchanged)))
+		b.WriteString("\n")
+	}
+	if !hadDelta && unchanged == 0 {
+		b.WriteString(StyleInfo.Render("  No tickers in watchlist."))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(StyleInfo.Render("  Snapshots updated. Type a flagged ticker to see full DD, or /filings TICKER."))
 	b.WriteString("\n")
 	return b.String()
 }

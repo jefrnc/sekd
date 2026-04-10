@@ -100,6 +100,7 @@ type Model struct {
 	lastScore   *analysis.DDScore
 	suggestions []string // ticker suggestions for tab completion
 	sugIdx      int      // current suggestion index (-1 = none)
+	cmdSugIdx   int      // slash-command palette selection (-1 = none, so Tab picks first)
 	tipIdx      int      // rotating tip index
 }
 
@@ -344,6 +345,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case watchlistScanDoneMsg:
+		if msg.err != nil {
+			m.output = StyleError.Render("  ✗ " + msg.err.Error())
+			m.state = stateResult
+		} else {
+			elapsed := fmt.Sprintf("%.1fs", msg.elapsed.Seconds())
+			m.setResult(msg.output + StyleInfo.Render(fmt.Sprintf("  Scan completed in %s", elapsed)) + "\n")
+		}
+		return m, nil
+
 	case progressMsg:
 		m.statusMsg = string(msg)
 		return m, nil
@@ -355,8 +366,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.state == stateInput || m.state == stateResult {
+		prevValue := m.textInput.Value()
 		var cmd tea.Cmd
 		m.textInput, cmd = m.textInput.Update(msg)
+		// Reset palette selection whenever the text actually changed so Tab
+		// starts cycling from the first match again.
+		if m.textInput.Value() != prevValue {
+			m.cmdSugIdx = -1
+		}
 		return m, cmd
 	}
 
@@ -381,7 +398,12 @@ func (m Model) View() string {
 			content.WriteString(StyleInfo.Render(m.suggestions[m.sugIdx]))
 		}
 		content.WriteString("\n")
-		if len(tips) > 0 {
+
+		// Slash command palette: show filtered list when input starts with /
+		currentInput := strings.TrimSpace(m.textInput.Value())
+		if strings.HasPrefix(currentInput, "/") {
+			content.WriteString(renderSlashPalette(currentInput, m.cmdSugIdx))
+		} else if len(tips) > 0 {
 			tip := tips[m.tipIdx%len(tips)]
 			content.WriteString(StyleInfo.Render(fmt.Sprintf("  tip: %s", tip)))
 			content.WriteString("\n")
@@ -548,6 +570,7 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 	m.histDraft = ""
 	m.suggestions = nil
 	m.sugIdx = -1
+	m.cmdSugIdx = -1
 	m.tipIdx++
 
 	if input == "" {
@@ -851,6 +874,17 @@ func (m *Model) handleWatchlist(parts []string) (tea.Model, tea.Cmd) {
 		m.state = stateInput
 		return m, nil
 
+	case "scan":
+		if len(wl.Entries) == 0 {
+			m.output = StyleError.Render("  ✗ Watchlist is empty. Add tickers first: /watchlist add TICKER")
+			m.state = stateInput
+			return m, nil
+		}
+		m.state = stateLoading
+		m.startTime = time.Now()
+		m.statusMsg = fmt.Sprintf("Scanning %d watched tickers...", len(wl.Entries))
+		return m, m.watchlistScanCmd(wl)
+
 	case "remove", "rm", "del":
 		if len(parts) < 3 {
 			m.output = StyleError.Render("  ✗ Usage: /watchlist remove TICKER")
@@ -887,6 +921,24 @@ type compareDoneMsg struct {
 	elapsed time.Duration
 }
 
+type watchlistScanDoneMsg struct {
+	output  string
+	err     error
+	elapsed time.Duration
+}
+
+// scanResult is the per-ticker outcome produced while scanning a watchlist.
+type scanResult struct {
+	ticker      string
+	prev        *watchlist.Entry
+	cur         *analysis.Report
+	err         error
+	hasNew      bool   // new filing since last scan
+	scoreDelta  int    // cur.Score.Score - prev.LastScore
+	newFlags    []string
+	removedFlags []string
+}
+
 func (m *Model) handleCompare(parts []string) (tea.Model, tea.Cmd) {
 	if len(parts) < 3 {
 		m.output = StyleError.Render("  ✗ Usage: /compare TICKER1 TICKER2")
@@ -899,6 +951,81 @@ func (m *Model) handleCompare(parts []string) (tea.Model, tea.Cmd) {
 	m.startTime = time.Now()
 	m.statusMsg = fmt.Sprintf("Comparing %s vs %s...", t1, t2)
 	return m, m.compareCmd(t1, t2)
+}
+
+// watchlistScanCmd rebuilds a fresh report for every ticker in the watchlist,
+// compares each one against the previously stored snapshot, updates the
+// snapshot on disk, and returns a rendered delta report.
+func (m *Model) watchlistScanCmd(wl *watchlist.Watchlist) tea.Cmd {
+	start := m.startTime
+	return func() tea.Msg {
+		ctx := context.Background()
+		builder := report.NewBuilder(m.cache)
+
+		results := make([]scanResult, 0, len(wl.Entries))
+		// Work on copies so we update the file once at the end.
+		entries := make([]watchlist.Entry, len(wl.Entries))
+		copy(entries, wl.Entries)
+
+		for i := range entries {
+			prev := entries[i]
+			rep, err := builder.Build(ctx, prev.Ticker)
+			if err != nil {
+				results = append(results, scanResult{ticker: prev.Ticker, err: err})
+				continue
+			}
+			r := scanResult{ticker: prev.Ticker, prev: &prev, cur: rep}
+			if prev.HasSnapshot() {
+				if rep.LatestAccession != "" && rep.LatestAccession != prev.LastAccession {
+					r.hasNew = true
+				}
+				r.scoreDelta = rep.Score.Score - prev.LastScore
+				r.newFlags, r.removedFlags = diffFlags(prev.LastFlags, currentFlagLabels(rep))
+			}
+			results = append(results, r)
+
+			// Update in-memory snapshot to write back at the end.
+			wl.UpdateSnapshot(prev.Ticker, rep.Score.Score, rep.Score.Grade,
+				currentFlagLabels(rep), rep.LatestAccession, rep.LatestFilingDate)
+		}
+
+		// Persist updated snapshots.
+		_ = wl.Save()
+
+		output := renderScanResults(results)
+		return watchlistScanDoneMsg{output: output, elapsed: time.Since(start)}
+	}
+}
+
+// currentFlagLabels returns the label of every active risk flag on a report
+// in a deterministic, comparable form.
+func currentFlagLabels(r *analysis.Report) []string {
+	out := make([]string, 0, len(r.RiskFlags))
+	for _, f := range r.RiskFlags {
+		out = append(out, f.Label)
+	}
+	return out
+}
+
+// diffFlags returns (added, removed) between two flag label slices.
+func diffFlags(prev, cur []string) (added, removed []string) {
+	prevSet := make(map[string]bool, len(prev))
+	for _, p := range prev {
+		prevSet[p] = true
+	}
+	curSet := make(map[string]bool, len(cur))
+	for _, c := range cur {
+		curSet[c] = true
+		if !prevSet[c] {
+			added = append(added, c)
+		}
+	}
+	for _, p := range prev {
+		if !curSet[p] {
+			removed = append(removed, p)
+		}
+	}
+	return
 }
 
 func (m *Model) compareCmd(t1, t2 string) tea.Cmd {
@@ -923,10 +1050,27 @@ func (m *Model) compareCmd(t1, t2 string) tea.Cmd {
 }
 
 func (m *Model) handleTab() (tea.Model, tea.Cmd) {
-	input := strings.ToUpper(strings.TrimSpace(m.textInput.Value()))
-	if input == "" || strings.HasPrefix(input, "/") {
+	raw := strings.TrimSpace(m.textInput.Value())
+	if raw == "" {
 		return m, nil
 	}
+
+	// Slash commands: cycle through palette matches.
+	if strings.HasPrefix(raw, "/") {
+		matches := MatchSlashCommands(raw)
+		if len(matches) == 0 {
+			return m, nil
+		}
+		m.cmdSugIdx++
+		if m.cmdSugIdx >= len(matches) {
+			m.cmdSugIdx = 0
+		}
+		m.textInput.SetValue(matches[m.cmdSugIdx].Canonical() + " ")
+		m.textInput.CursorEnd()
+		return m, nil
+	}
+
+	input := strings.ToUpper(raw)
 
 	// Build suggestions from watchlist + recent tickers
 	if m.suggestions == nil || !strings.HasPrefix(strings.ToUpper(m.suggestions[0]), input[:1]) {

@@ -71,6 +71,10 @@ func RenderTerminal(r *analysis.Report) {
 		fmt.Println()
 	}
 
+	if r.Deep != nil {
+		renderDeepTerminal(r.Deep)
+	}
+
 	// Insider Activity
 	fmt.Printf("  Insider Transactions (Form 4): %d filings in last %s\n\n", r.Insider.Form4Count, r.Insider.Period)
 
@@ -103,6 +107,134 @@ func RenderTerminal(r *analysis.Report) {
 	}
 	scoreColor.Printf("%d/100 (Grade: %s)\n", r.Score.Score, r.Score.Grade)
 	fmt.Printf("  %s\n\n", r.Score.Summary)
+}
+
+func renderDeepTerminal(d *analysis.DeepDilution) {
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.SetTitle("DEEP DILUTION DETAIL")
+	t.AppendHeader(table.Row{"Metric", "Value"})
+	if d.ShelfTotalUSD > 0 {
+		t.AppendRow(table.Row{"Shelf Total", "$" + formatUSD(d.ShelfTotalUSD)})
+	}
+	if d.ShelfUsedUSD > 0 {
+		t.AppendRow(table.Row{"Shelf Used", "$" + formatUSD(d.ShelfUsedUSD)})
+	}
+	if d.ShelfRemainingUSD > 0 {
+		t.AppendRow(table.Row{"Shelf Remaining", "$" + formatUSD(d.ShelfRemainingUSD)})
+	}
+	if d.ATMCapacityRemainingUSD > 0 {
+		t.AppendRow(table.Row{"ATM Capacity Remaining", "$" + formatUSD(d.ATMCapacityRemainingUSD)})
+	}
+	if d.ITMWarrantShares > 0 {
+		t.AppendRow(table.Row{"Warrant Shares ITM", formatShares(d.ITMWarrantShares)})
+	}
+	t.AppendRow(table.Row{"Sources", fmt.Sprintf("%d filings", len(d.Sources))})
+	t.SetStyle(table.StyleRounded)
+	t.Render()
+	fmt.Println()
+
+	if len(d.Warrants) > 0 {
+		wt := table.NewWriter()
+		wt.SetOutputMirror(os.Stdout)
+		wt.SetTitle("WARRANTS")
+		wt.AppendHeader(table.Row{"Strike", "Shares", "Expiration", "ITM", "Description"})
+		for _, w := range d.Warrants {
+			itm := ""
+			if w.InTheMoney {
+				itm = "YES"
+			}
+			wt.AppendRow(table.Row{
+				formatUSDOrDash(w.Strike, 2),
+				formatSharesOrDash(w.Shares),
+				dashIfEmpty(w.Expiration),
+				itm,
+				truncate(w.Description, 40),
+			})
+		}
+		wt.SetStyle(table.StyleRounded)
+		wt.Render()
+		fmt.Println()
+	}
+
+	if len(d.Convertibles) > 0 {
+		ct := table.NewWriter()
+		ct.SetOutputMirror(os.Stdout)
+		ct.SetTitle("CONVERTIBLES")
+		ct.AppendHeader(table.Row{"Conv. Price", "Principal", "Maturity", "ITM", "Description"})
+		for _, cv := range d.Convertibles {
+			itm := ""
+			if cv.InTheMoney {
+				itm = "YES"
+			}
+			ct.AppendRow(table.Row{
+				formatUSDOrDash(cv.ConversionPrice, 4),
+				formatUSDPrincipalOrDash(cv.PrincipalUSD),
+				dashIfEmpty(cv.Maturity),
+				itm,
+				truncate(cv.Description, 40),
+			})
+		}
+		ct.SetStyle(table.StyleRounded)
+		ct.Render()
+		fmt.Println()
+	}
+
+	if len(d.Notes) > 0 {
+		fmt.Println("  Notes:")
+		for _, n := range d.Notes {
+			fmt.Printf("    - %s\n", n)
+		}
+		fmt.Println()
+	}
+}
+
+func formatUSDOrDash(n float64, decimals int) string {
+	if n <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("$%.*f", decimals, n)
+}
+
+func formatUSDPrincipalOrDash(n float64) string {
+	if n <= 0 {
+		return "—"
+	}
+	return "$" + formatUSD(n)
+}
+
+func formatSharesOrDash(n float64) string {
+	if n <= 0 {
+		return "—"
+	}
+	return formatShares(n)
+}
+
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+func formatUSD(n float64) string {
+	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.2fB", n/1_000_000_000)
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", n/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fK", n/1_000)
+	default:
+		return fmt.Sprintf("%.0f", n)
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 func formatShares(n float64) string {
