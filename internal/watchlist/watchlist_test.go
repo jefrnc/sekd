@@ -24,6 +24,88 @@ func TestAddAndTickers(t *testing.T) {
 	}
 }
 
+func TestUpdateSnapshot(t *testing.T) {
+	w := testWatchlist(t)
+	w.Add("SOUN", "")
+
+	before := w.Entries[0]
+	if before.HasSnapshot() {
+		t.Error("fresh entry should not report HasSnapshot")
+	}
+
+	ok := w.UpdateSnapshot("SOUN", 55, "D", []string{"High Dilution", "High Short Interest"}, "0001840856-25-000001", "2025-01-28")
+	if !ok {
+		t.Fatal("UpdateSnapshot returned false for existing ticker")
+	}
+
+	after := w.Entries[0]
+	if !after.HasSnapshot() {
+		t.Error("entry should report HasSnapshot after update")
+	}
+	if after.LastScore != 55 || after.LastGrade != "D" {
+		t.Errorf("score/grade not saved: %+v", after)
+	}
+	if after.LastAccession != "0001840856-25-000001" {
+		t.Errorf("accession not saved: %q", after.LastAccession)
+	}
+	if len(after.LastFlags) != 2 {
+		t.Errorf("flags not saved: %v", after.LastFlags)
+	}
+	if after.LastScannedAt == 0 {
+		t.Error("LastScannedAt should be set")
+	}
+}
+
+func TestUpdateSnapshot_UnknownTicker(t *testing.T) {
+	w := testWatchlist(t)
+	if w.UpdateSnapshot("NOPE", 0, "", nil, "", "") {
+		t.Error("expected false for unknown ticker")
+	}
+}
+
+func TestLoad_CorruptFileIsBackedUpNotDestroyed(t *testing.T) {
+	// Regression test for a data-loss footgun: Load used to silently
+	// discard corrupt JSON, and the next Save would overwrite the
+	// original file destroying whatever the user had. Now Load must
+	// back up the corrupt file and refuse to auto-save over it.
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	sekdDir := filepath.Join(dir, ".sekd")
+	if err := os.MkdirAll(sekdDir, 0700); err != nil {
+		t.Fatalf("setup mkdir: %v", err)
+	}
+	realPath := filepath.Join(sekdDir, "watchlist.json")
+	if err := os.WriteFile(realPath, []byte("this is not valid json {{{"), 0600); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+
+	wl, err := Load()
+	if err == nil {
+		t.Fatal("Load should return an error for corrupt JSON")
+	}
+	if wl == nil {
+		t.Fatal("Load should still return a safe empty Watchlist on error")
+	}
+	if len(wl.Entries) != 0 {
+		t.Errorf("expected empty entries, got %d", len(wl.Entries))
+	}
+
+	matches, globErr := filepath.Glob(filepath.Join(sekdDir, "watchlist.json.broken-*"))
+	if globErr != nil {
+		t.Fatalf("glob: %v", globErr)
+	}
+	if len(matches) == 0 {
+		t.Error("expected a backup .broken-* file to exist after corrupt load")
+	}
+
+	// Save on the returned Watchlist must refuse to touch disk because
+	// the path is intentionally empty to prevent overwriting.
+	if saveErr := wl.Save(); saveErr == nil {
+		t.Error("Save should refuse to write when path is empty")
+	}
+}
+
 func TestAddDuplicate(t *testing.T) {
 	w := testWatchlist(t)
 	w.Add("SOUN", "")

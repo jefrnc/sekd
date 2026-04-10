@@ -50,6 +50,10 @@ func RenderMarkdown(r *analysis.Report) {
 		fmt.Println()
 	}
 
+	if r.Deep != nil {
+		renderDeepMarkdown(r.Deep)
+	}
+
 	fmt.Printf("## Insider Activity\n\n")
 	fmt.Printf("- **Form 4 filings**: %d in last %s\n\n", r.Insider.Form4Count, r.Insider.Period)
 
@@ -72,4 +76,67 @@ func RenderMarkdown(r *analysis.Report) {
 	fmt.Println()
 	fmt.Printf("**%d/100** (Grade: **%s**)\n\n", r.Score.Score, r.Score.Grade)
 	fmt.Printf("> %s\n", r.Score.Summary)
+}
+
+func renderDeepMarkdown(d *analysis.DeepDilution) {
+	fmt.Println("## Deep Dilution Detail")
+	fmt.Println()
+	fmt.Println("| Metric | Value |")
+	fmt.Println("|--------|-------|")
+	if d.ShelfTotalUSD > 0 {
+		fmt.Printf("| Shelf Total | $%s |\n", formatUSD(d.ShelfTotalUSD))
+	}
+	if d.ShelfUsedUSD > 0 {
+		fmt.Printf("| Shelf Used | $%s |\n", formatUSD(d.ShelfUsedUSD))
+	}
+	if d.ShelfRemainingUSD > 0 {
+		fmt.Printf("| Shelf Remaining | $%s |\n", formatUSD(d.ShelfRemainingUSD))
+	}
+	if d.ATMCapacityRemainingUSD > 0 {
+		fmt.Printf("| ATM Capacity Remaining | $%s |\n", formatUSD(d.ATMCapacityRemainingUSD))
+	}
+	if d.ITMWarrantShares > 0 {
+		fmt.Printf("| Warrant Shares ITM | %s |\n", formatShares(d.ITMWarrantShares))
+	}
+	fmt.Printf("| Sources | %d filings |\n", len(d.Sources))
+	fmt.Println()
+
+	if len(d.Warrants) > 0 {
+		fmt.Println("### Warrants")
+		fmt.Println()
+		fmt.Println("| Strike | Shares | Expiration | ITM | Description |")
+		fmt.Println("|--------|--------|------------|-----|-------------|")
+		for _, w := range d.Warrants {
+			itm := ""
+			if w.InTheMoney {
+				itm = "yes"
+			}
+			fmt.Printf("| %s | %s | %s | %s | %s |\n", formatUSDOrDash(w.Strike, 2), formatSharesOrDash(w.Shares), dashIfEmpty(w.Expiration), itm, w.Description)
+		}
+		fmt.Println()
+	}
+
+	if len(d.Convertibles) > 0 {
+		fmt.Println("### Convertibles")
+		fmt.Println()
+		fmt.Println("| Conv. Price | Principal | Maturity | ITM | Description |")
+		fmt.Println("|-------------|-----------|----------|-----|-------------|")
+		for _, cv := range d.Convertibles {
+			itm := ""
+			if cv.InTheMoney {
+				itm = "yes"
+			}
+			fmt.Printf("| %s | %s | %s | %s | %s |\n", formatUSDOrDash(cv.ConversionPrice, 4), formatUSDPrincipalOrDash(cv.PrincipalUSD), dashIfEmpty(cv.Maturity), itm, cv.Description)
+		}
+		fmt.Println()
+	}
+
+	if len(d.Notes) > 0 {
+		fmt.Println("### Notes")
+		fmt.Println()
+		for _, n := range d.Notes {
+			fmt.Printf("- %s\n", n)
+		}
+		fmt.Println()
+	}
 }

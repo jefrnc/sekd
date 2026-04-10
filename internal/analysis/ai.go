@@ -98,6 +98,127 @@ func AnalyzeFiling(ctx context.Context, doc *edgar.FilingDocument) (*AIAnalysis,
 	return result, nil
 }
 
+// CallLLMJSON sends a prompt to the configured provider and returns the raw
+// response text (expected to be JSON), along with provider and model used.
+// Callers are responsible for parsing the JSON into their own schema.
+func CallLLMJSON(ctx context.Context, prompt string, maxTokens int) (string, string, string, error) {
+	provider, apiKey := DetectProvider()
+	if provider == "" {
+		return "", "", "", fmt.Errorf("no AI provider configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY")
+	}
+
+	switch provider {
+	case ProviderOpenAI:
+		return callOpenAIRaw(ctx, apiKey, prompt)
+	case ProviderAnthropic:
+		return callAnthropicRaw(ctx, apiKey, prompt, maxTokens)
+	}
+	return "", "", "", fmt.Errorf("unknown provider")
+}
+
+func callOpenAIRaw(ctx context.Context, apiKey, prompt string) (string, string, string, error) {
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+
+	body := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"temperature":     0.1,
+		"response_format": map[string]string{"type": "json_object"},
+	}
+
+	jsonBody, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return "", "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", "", fmt.Errorf("OpenAI request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", "", "", fmt.Errorf("OpenAI returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var openaiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBody, &openaiResp); err != nil {
+		return "", "", "", err
+	}
+	if len(openaiResp.Choices) == 0 {
+		return "", "", "", fmt.Errorf("OpenAI returned no choices")
+	}
+	return openaiResp.Choices[0].Message.Content, "openai", model, nil
+}
+
+func callAnthropicRaw(ctx context.Context, apiKey, prompt string, maxTokens int) (string, string, string, error) {
+	model := os.Getenv("ANTHROPIC_MODEL")
+	if model == "" {
+		model = "claude-haiku-4-5-20251001"
+	}
+	if maxTokens <= 0 {
+		maxTokens = 2048
+	}
+
+	body := map[string]interface{}{
+		"model":      model,
+		"max_tokens": maxTokens,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+	}
+
+	jsonBody, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(jsonBody))
+	if err != nil {
+		return "", "", "", err
+	}
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", "", fmt.Errorf("Anthropic request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", "", "", fmt.Errorf("Anthropic returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var anthropicResp struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(respBody, &anthropicResp); err != nil {
+		return "", "", "", err
+	}
+	if len(anthropicResp.Content) == 0 {
+		return "", "", "", fmt.Errorf("Anthropic returned no content")
+	}
+	return anthropicResp.Content[0].Text, "anthropic", model, nil
+}
+
 func callOpenAI(ctx context.Context, apiKey, prompt string) (*AIAnalysis, error) {
 	model := os.Getenv("OPENAI_MODEL")
 	if model == "" {

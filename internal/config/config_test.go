@@ -6,6 +6,34 @@ import (
 	"testing"
 )
 
+func TestLoad_CorruptFileReturnsError(t *testing.T) {
+	// Regression: Load used to silently discard a corrupt config,
+	// leaving the user wondering why their API key "disappeared".
+	// It must surface the error so the caller can warn the user.
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	sekdDir := filepath.Join(dir, ".sekd")
+	if err := os.MkdirAll(sekdDir, 0700); err != nil {
+		t.Fatalf("setup mkdir: %v", err)
+	}
+	path := filepath.Join(sekdDir, "config.json")
+	if err := os.WriteFile(path, []byte("this is not json {"), 0600); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load should return an error for corrupt JSON")
+	}
+	if cfg == nil {
+		t.Fatal("Load should still return a non-nil (empty) config on error")
+	}
+	if cfg.OpenAIKey != "" {
+		t.Errorf("corrupt config should yield empty key, got %q", cfg.OpenAIKey)
+	}
+}
+
 func TestSetAndSaveAndLoad(t *testing.T) {
 	// Use temp dir
 	dir := t.TempDir()

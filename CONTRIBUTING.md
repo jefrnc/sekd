@@ -40,15 +40,22 @@ make test
 ## Project structure
 
 ```
-cmd/            CLI commands (cobra)
+cmd/            CLI commands (cobra): report, filings, version, interactive
 internal/
-  analysis/     Dilution analysis, risk flags, scoring, AI integration
-  cache/        File-based HTTP response cache
+  analysis/     Dilution analysis, risk flags, scoring, AI integration,
+                deep LLM extraction (shelf/warrants/convertibles)
+  cache/        File-based HTTP and LLM response cache (~/.sekd/cache/)
+  clipboard/    Cross-platform clipboard copy
   config/       Configuration management (~/.sekd/config.json)
   edgar/        SEC EDGAR API client (submissions, XBRL, documents)
   finviz/       Finviz market data scraper
-  report/       Report renderers (terminal, JSON, markdown)
-  tui/          Interactive terminal UI (bubbletea)
+  history/      Per-session command and ticker history
+  notify/       Desktop notifications (macOS/Linux)
+  report/       Report builder and renderers (terminal, JSON, markdown)
+  session/      Session persistence
+  tui/          Interactive terminal UI (bubbletea), including the
+                slash command registry/palette
+  watchlist/    Watchlist storage + snapshot/diff tracking for scans
 ```
 
 ## Adding a new data source
@@ -77,7 +84,22 @@ internal/
 - Keep PRs focused on a single change
 - Include tests for new functionality
 - Update README if adding user-facing features
+- Update `CHANGELOG.md` under the `[Unreleased]` section
 - Run `go vet ./...` and fix all warnings
+- Do not commit binaries, cached data, or API keys — the `.gitignore` covers the common cases
+
+## Further reading
+
+- [`docs/architecture.md`](docs/architecture.md) — data flow diagrams for the normal report and deep extraction paths, plus where on-disk state lives
+- [`docs/deep-extraction.md`](docs/deep-extraction.md) — internals of `--deep`, including the prompt versioning rules you should read **before** touching `internal/analysis/deep.go`
+
+## Working on LLM-dependent features
+
+Two features rely on an AI provider (OpenAI or Anthropic): `/analyze` and `sekd report --deep`. When developing against them:
+
+- Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in your shell, or use `sekd /config set openai-key ...`
+- The deep extractor caches by accession number + prompt version under `~/.sekd/cache/`. If you change the prompt text, **bump `DeepPromptVersion` in `internal/analysis/deep.go`** to invalidate old cached results.
+- Avoid making real LLM calls in tests — `AnalyzeDeepFiling` is integration-tested manually; unit tests should target the pure helpers (`MergeDeep`, `MarkInTheMoney`, `parseDeepExtract`, `EvaluateDeepRiskFlags`).
 
 ## Reporting issues
 

@@ -15,6 +15,7 @@ var (
 	jsonOutput     bool
 	markdownOutput bool
 	noCache        bool
+	deepAnalysis   bool
 )
 
 var reportCmd = &cobra.Command{
@@ -29,13 +30,17 @@ var reportCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("initializing cache: %w", err)
 		}
+		if noCache {
+			c.SetBypass(true)
+			fmt.Fprintln(os.Stderr, "Cache bypass enabled: every request will hit the source.")
+		}
 
 		builder := report.NewBuilder(c)
 		ctx := context.Background()
 
 		fmt.Fprintf(os.Stderr, "Fetching data for %s...\n", ticker)
 
-		r, err := builder.Build(ctx, ticker)
+		r, err := builder.BuildWithOptions(ctx, ticker, report.BuildOptions{Deep: deepAnalysis})
 		if err != nil {
 			return fmt.Errorf("building report for %s: %w", ticker, err)
 		}
@@ -56,5 +61,6 @@ func init() {
 	reportCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output report as JSON")
 	reportCmd.Flags().BoolVar(&markdownOutput, "md", false, "Output report as Markdown")
 	reportCmd.Flags().BoolVar(&noCache, "no-cache", false, "Bypass cache")
+	reportCmd.Flags().BoolVar(&deepAnalysis, "deep", false, "Run LLM-based deep extraction of shelf capacity, warrants, and convertibles from recent filings (requires OpenAI or Anthropic key)")
 	rootCmd.AddCommand(reportCmd)
 }

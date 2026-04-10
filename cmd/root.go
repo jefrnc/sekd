@@ -11,9 +11,15 @@ import (
 
 func init() {
 	godotenv.Load()
-	if cfg, err := config.Load(); err == nil {
-		cfg.Apply()
+	cfg, err := config.Load()
+	if err != nil {
+		// Config is corrupt — warn loudly so the user knows their API keys
+		// aren't being read. Continue with an empty config so the rest of
+		// the tool still works for features that don't need a key.
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		fmt.Fprintln(os.Stderr, "         fix or delete the file, then re-run. sekd will continue with defaults for now.")
 	}
+	cfg.Apply()
 }
 
 var rootCmd = &cobra.Command{

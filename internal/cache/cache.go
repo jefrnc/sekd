@@ -9,7 +9,8 @@ import (
 )
 
 type Cache struct {
-	dir string
+	dir    string
+	bypass bool
 }
 
 func New() (*Cache, error) {
@@ -24,12 +25,35 @@ func New() (*Cache, error) {
 	return &Cache{dir: dir}, nil
 }
 
+// NewForTesting returns a Cache rooted at dir. It exists so tests in
+// other packages (e.g. finviz) can exercise cache-aware code without
+// polluting the real ~/.sekd/cache directory or duplicating the unexported
+// struct layout.
+func NewForTesting(dir string) *Cache {
+	return &Cache{dir: dir}
+}
+
+// SetBypass toggles read-bypass mode. When enabled, Get always reports a
+// miss, forcing callers to re-fetch from the source. Writes still happen
+// normally so the cache stays warm for subsequent non-bypass runs.
+func (c *Cache) SetBypass(bypass bool) {
+	c.bypass = bypass
+}
+
+// Bypass reports whether read-bypass mode is currently enabled.
+func (c *Cache) Bypass() bool {
+	return c.bypass
+}
+
 func (c *Cache) key(url string) string {
 	h := sha256.Sum256([]byte(url))
 	return fmt.Sprintf("%x", h)
 }
 
 func (c *Cache) Get(url string, ttl time.Duration) ([]byte, bool) {
+	if c.bypass {
+		return nil, false
+	}
 	path := filepath.Join(c.dir, c.key(url))
 	info, err := os.Stat(path)
 	if err != nil {

@@ -63,6 +63,58 @@ func TestGetExpired(t *testing.T) {
 	}
 }
 
+func TestBypass_GetAlwaysMisses(t *testing.T) {
+	c := testCache(t)
+	url := "https://example.com/bypass"
+	if err := c.Set(url, []byte("cached data")); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Sanity check: without bypass the entry should be returned.
+	if _, ok := c.Get(url, time.Hour); !ok {
+		t.Fatal("precondition failed: cached entry should be returned when bypass is off")
+	}
+
+	c.SetBypass(true)
+	if !c.Bypass() {
+		t.Error("Bypass() should report true after SetBypass(true)")
+	}
+
+	if _, ok := c.Get(url, time.Hour); ok {
+		t.Error("Get should miss when bypass is enabled even if entry exists")
+	}
+}
+
+func TestBypass_SetStillWrites(t *testing.T) {
+	// Writes must still happen during bypass so the cache warms up for the
+	// next non-bypass run. This is what keeps --no-cache from invalidating
+	// subsequent cached reads.
+	c := testCache(t)
+	c.SetBypass(true)
+
+	url := "https://example.com/warming"
+	if err := c.Set(url, []byte("warm data")); err != nil {
+		t.Fatalf("Set failed under bypass: %v", err)
+	}
+
+	// Turn bypass off and confirm the entry we wrote is retrievable.
+	c.SetBypass(false)
+	got, ok := c.Get(url, time.Hour)
+	if !ok {
+		t.Fatal("entry written during bypass was not retrievable after disabling bypass")
+	}
+	if string(got) != "warm data" {
+		t.Errorf("Get = %q, want %q", got, "warm data")
+	}
+}
+
+func TestBypass_DefaultOff(t *testing.T) {
+	c := testCache(t)
+	if c.Bypass() {
+		t.Error("new cache should default to bypass disabled")
+	}
+}
+
 func TestKeyDeterministic(t *testing.T) {
 	c := testCache(t)
 	k1 := c.key("https://example.com/a")

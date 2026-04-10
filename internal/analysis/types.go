@@ -10,6 +10,8 @@ const (
 	FlagHighShortInt    RiskFlag = "HIGH_SHORT_INTEREST"
 	FlagShelfReg        RiskFlag = "SHELF_REGISTRATION"
 	FlagMassiveAuthorized RiskFlag = "MASSIVE_AUTHORIZED_SHARES"
+	FlagWarrantsITM     RiskFlag = "WARRANTS_IN_THE_MONEY"
+	FlagShelfCapacity   RiskFlag = "LARGE_SHELF_REMAINING"
 )
 
 type RiskFlagDetail struct {
@@ -73,4 +75,13 @@ type Report struct {
 	Insider         InsiderSummary
 	RiskFlags       []RiskFlagDetail
 	Score           DDScore
+	Deep            *DeepDilution `json:",omitempty"`
+
+	// LatestAccession is the accession number of the most recent filing of
+	// any form type. Populated by the builder so callers (e.g. watchlist
+	// scan) can detect "anything new since last time I looked" without
+	// re-fetching submissions.
+	LatestAccession  string `json:",omitempty"`
+	LatestFilingDate string `json:",omitempty"`
+	LatestFilingForm string `json:",omitempty"`
 }
